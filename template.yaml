@@ -14,63 +14,175 @@ Resources:
   CfbdDataIngestionFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: hello_world/
-      Handler: app.lambda_handler
+      CodeUri: cfbd_data/
+      Handler: app.cfbd_data_ingestion
       Runtime: python3.9
+      Timeout: 900
+      MemorySize: 128
       Architectures:
         - x86_64
+      Policies:
+        - Statement:
+            - Sid: Cfbds3ArchiveAccessPolicy
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: arn:aws:s3:::cfbd-data-archive/*
+        - Statement:
+            - Sid: CfbdSecretManagerAccess
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: arn:aws:secretsmanager:us-east-1:430738663938:secret:prod/cfbd/apiKey-ZRZ1c3
+      Environment:
+        Variables:
+          s3_destination: cfbd-data-archive
+          secret_name: prod/cfbd/apiKey
+          secret_region: us-east-1
+      Layers:
+        - !Ref libs
+        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
+
+  DataIngestionWrapperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: cfbd_data/
+      Handler: app.cfbd_ingestion_wrapper
+      Runtime: python3.9
+      Timeout: 900
+      MemorySize: 128
+      Architectures:
+        - x86_64
+      Policies:
+        - Statement:
+            - Sid: CfbdIngestionInvokePolicy
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt CfbdDataIngestionFunction.Arn
+      Environment:
+        Variables:
+          CfbdFunction: !GetAtt CfbdDataIngestionFunction.Arn
+      Layers:
+        - !Ref libs
+        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
+  ApplyPredictionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: cfbd_data/
+      Handler: app.apply_prediction
+      Runtime: python3.9
+      Timeout: 900
+      MemorySize: 360
+      Architectures:
+        - x86_64
+      Policies:
+        - Statement:
+            - Sid: Cfbds3ArchiveAccessPolicy
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: arn:aws:s3:::cfbd-data-archive/*
+      Environment:
+        Variables:
+          s3_source_bucket: cfbd-data-archive
+          betting_lines_file: CFBD_Analysis/BettingApi_get_lines_data_extract.txt
+          games_data_file: CFBD_Analysis/GamesApi_get_games_data_extract.txt
+          team_game_stats_file: CFBD_Analysis/GamesApi_get_team_game_stats_data_extract.txt
+          player_season_stats_file: CFBD_Analysis/PlayersApi_get_player_season_stats_data_extract.txt
+          transfer_portal_file: CFBD_Analysis/PlayersApi_get_transfer_portal_data_extract.txt
+          recruiting_groups_file: CFBD_Analysis/RecruitingApi_get_recruiting_groups_data_extract.txt
+          recruiting_players_file: CFBD_Analysis/RecruitingApi_get_recruiting_players_data_extract.txt
+          advanced_team_game_stats_file: CFBD_Analysis/StatsApi_get_advanced_team_game_stats_data_extract.txt
+          fbs_teams_file: CFBD_Analysis/TeamsApi_get_fbs_teams_data_extract.txt
+          roster_data_file: CFBD_Analysis/TeamsApi_get_roster_data_extract.txt
+          output_file: CFBD_Analysis/output/output_prediction.txt
+      Layers:
+        - !Ref libs
+        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
+
+  PredictionOutputFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: cfbd_data/
+      Handler: app.prediction_output
+      Runtime: python3.9
+      Timeout: 900
+      MemorySize: 128
+      Architectures:
+        - x86_64
+      Policies:
+        - Statement:
+            - Sid: Cfbds3ArchiveAccessPolicy
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: arn:aws:s3:::cfbd-data-archive/*
+      Environment:
+        Variables:
+          s3_source_bucket: cfbd-data-archive
+          output_prediction_file: CFBD_Analysis/output/output_prediction.txt
       Events:
-        CfbdDataIngestion:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+        PredictionOutput:
+          Type: Api
           Properties:
-            Path: /hello
+            Path: /prediction_output
             Method: get
       Layers:
         - !Ref libs
+        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
+
   libs:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: cfbd-analytics-packages
-      Description: Lambda layer with libs like pocket and datetime
+      LayerName: cfbd-analytics-packages-general
+      Description: Lambda layer with libs like pandas and datetime
       ContentUri: libs
-#  S3DataExtract:
-#    Type: 'AWS::S3::Bucket'
-#    Properties:
-#      BucketName: !Sub 'cfbd-data-archive'
-#      PublicAccessBlockConfiguration:
-#        BlockPublicAcls: true
-#        BlockPublicPolicy: true
-#        IgnorePublicAcls: true
-#        RestrictPublicBuckets: true
-#      VersioningConfiguration:
-#        Status: Enabled
-#      BucketEncryption:
-#        ServerSideEncryptionConfiguration:
-#          - ServerSideEncryptionByDefault:
-#              SSEAlgorithm: 'AES256'
+
+  S3DataExtract:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub 'cfbd-data-archive'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: 'AES256'
 
   # Web Platform Infrastructure Resources
-  SimpleAPI:
+  GameLineAPI:
     Type: 'AWS::ApiGateway::RestApi'
     Properties:
       Description: A simple CORS compliant API
-      Name: SimpleAPI
+      Name: GameLineAPI
       EndpointConfiguration:
         Types:
           - REGIONAL
 
   # The Resource (/hello) of our API
-  SimpleAPIResource:
+  GameLineAPIResource:
     Type: 'AWS::ApiGateway::Resource'
     Properties:
       ParentId: !GetAtt
-        - SimpleAPI
+        - GameLineAPI
         - RootResourceId
       PathPart: hello
-      RestApiId: !Ref SimpleAPI
+      RestApiId: !Ref GameLineAPI
 
   # The method to call (GET) for our API
-  HelloAPIGETMethod:
+  GameLineAPIGETMethod:
     Type: 'AWS::ApiGateway::Method'
     #checkov:skip=CKV_AWS_59: "This API does not expose backend service"
     Properties:
@@ -95,23 +207,23 @@ Resources:
             method.response.header.Access-Control-Allow-Origin: true
           ResponseModels:
             application/json: Empty
-      RestApiId: !Ref SimpleAPI
-      ResourceId: !Ref SimpleAPIResource
+      RestApiId: !Ref GameLineAPI
+      ResourceId: !Ref GameLineAPIResource
 
   # A deployment resource for deploying our API
   Deployment:
     Type: 'AWS::ApiGateway::Deployment'
     DependsOn:
-      - HelloAPIGETMethod
+      - GameLineAPIGETMethod
     Properties:
-      RestApiId: !Ref SimpleAPI
+      RestApiId: !Ref GameLineAPI
       StageName: v1
 
   # The Amazon S3 bucket into which our Single Page Application build files must be deployed
   S3Bucket:
     Type: 'AWS::S3::Bucket'
     Properties:
-      BucketName: !Sub 'react-cors-spa-${SimpleAPI}'
+      BucketName: !Sub 'react-cors-spa-${GameLineAPI}'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -152,7 +264,7 @@ Resources:
     #checkov:skip=CKV_AWS_18: "This bucket is private and only for storing logs"
     Type: 'AWS::S3::Bucket'
     Properties:
-      BucketName: !Sub 'react-cors-spa-${SimpleAPI}-logs'
+      BucketName: !Sub 'react-cors-spa-${GameLineAPI}-logs'
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -206,7 +318,7 @@ Resources:
       - S3Bucket
     Properties:
       CloudFrontOriginAccessIdentityConfig:
-        Comment: !Sub 'access-identity-react-cors-spa-${SimpleAPI}'
+        Comment: !Sub 'access-identity-react-cors-spa-${GameLineAPI}'
 
 
 
@@ -215,9 +327,15 @@ Outputs:
   # Find out more about other implicit resources you can reference within SAM
   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
   CfbdDataIngestionFunction:
-    Description: "College Football Data Ingestion ARN"
+    Description: "College Football Data Ingestion Function ARN"
     Value: !GetAtt CfbdDataIngestionFunction.Arn
+  DataIngestionWrapperFunction:
+    Description: "Data Ingestion Wrapper Function ARN"
+    Value: !GetAtt DataIngestionWrapperFunction.Arn
+  PredictionOutputFunction:
+    Description: "API Prediction Output Function ARN"
+    Value: !GetAtt PredictionOutputFunction.Arn
   WebAPIEndpoint:
-    Value: !Sub "https://${SimpleAPI}.execute-api.${AWS::Region}.amazonaws.com/v1/hello"
+    Value: !Sub "https://${GameLineAPI}.execute-api.${AWS::Region}.amazonaws.com/v1/hello"
   WebBucketName:
     Value: !Sub "react-cors-spa-${CFOriginAccessIdentity}"

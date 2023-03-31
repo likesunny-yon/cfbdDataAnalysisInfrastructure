@@ -1,26 +1,58 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  test
-
-  Sample SAM Template for test
+  SAM Template for oldsprucetree college football score prediction site
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 3
+    Timeout: 30
+    MemorySize: 128
 
 Resources:
+  PredictionProcessingStateMachine:
+    Type: AWS::Serverless::StateMachine # More info about State Machine Resource: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-statemachine.html
+    Properties:
+      DefinitionUri: statemachine/prediction_processing.asl.json
+      DefinitionSubstitutions:
+        CfbdDataIngestionFunction: !GetAtt CfbdDataIngestionFunction.Arn
+        ApplyPpaAttributionFunction: !GetAtt ApplyPpaAttributionFunction.Arn
+        StackGameTransformationFunction: !GetAtt StackGameTransformationFunction.Arn
+        RecruitingTransformationFunction: !GetAtt RecruitingTransformationFunction.Arn
+        PreForecastTransformationFunction: !GetAtt PreForecastTransformationFunction.Arn
+        ApplyPredictionFunction: !GetAtt ApplyPredictionFunction.Arn
+      #Events:
+      #  GameProcessingSchedule:
+      #    Type: Schedule # More info about Schedule Event Source: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-property-statemachine-schedule.html
+      #    Properties:
+      #      Description: Schedule to run pre game processing on a weekly basis
+      #      Enabled: False # This schedule is disabled by default to avoid incurring charges.
+      #      Schedule: "rate(1 week)"
+      Policies: # Find out more about SAM policy templates: https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-policy-templates.html
+        - LambdaInvokePolicy:
+            FunctionName: !Ref CfbdDataIngestionFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ApplyPpaAttributionFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref StackGameTransformationFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RecruitingTransformationFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PreForecastTransformationFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ApplyPredictionFunction
+
   CfbdDataIngestionFunction:
     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
     Properties:
-      CodeUri: cfbd_data/
-      Handler: app.cfbd_data_ingestion
-      Runtime: python3.9
+      PackageType: Image
       Timeout: 900
       MemorySize: 128
       Architectures:
         - x86_64
+      ImageConfig:
+        Command:
+          - app.cfbd_data_ingestion
       Policies:
         - Statement:
             - Sid: Cfbds3ArchiveAccessPolicy
@@ -41,43 +73,22 @@ Resources:
           s3_destination: cfbd-data-archive
           secret_name: prod/cfbd/apiKey
           secret_region: us-east-1
-      Layers:
-        - !Ref libs
-        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
 
-  DataIngestionWrapperFunction:
+  ApplyPpaAttributionFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: cfbd_data/
-      Handler: app.cfbd_ingestion_wrapper
-      Runtime: python3.9
+      PackageType: Image
       Timeout: 900
-      MemorySize: 128
+      MemorySize: 540
       Architectures:
         - x86_64
-      Policies:
-        - Statement:
-            - Sid: CfbdIngestionInvokePolicy
-              Effect: Allow
-              Action:
-                - lambda:InvokeFunction
-              Resource: !GetAtt CfbdDataIngestionFunction.Arn
-      Environment:
-        Variables:
-          CfbdFunction: !GetAtt CfbdDataIngestionFunction.Arn
-      Layers:
-        - !Ref libs
-        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
-  ApplyPredictionFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: cfbd_data/
-      Handler: app.apply_prediction
-      Runtime: python3.9
-      Timeout: 900
-      MemorySize: 360
-      Architectures:
-        - x86_64
+      ImageConfig:
+        Command:
+          - app.apply_ppa_attribution
       Policies:
         - Statement:
             - Sid: Cfbds3ArchiveAccessPolicy
@@ -90,31 +101,134 @@ Resources:
       Environment:
         Variables:
           s3_source_bucket: cfbd-data-archive
-          betting_lines_file: CFBD_Analysis/BettingApi_get_lines_data_extract.txt
-          games_data_file: CFBD_Analysis/GamesApi_get_games_data_extract.txt
-          team_game_stats_file: CFBD_Analysis/GamesApi_get_team_game_stats_data_extract.txt
-          player_season_stats_file: CFBD_Analysis/PlayersApi_get_player_season_stats_data_extract.txt
-          transfer_portal_file: CFBD_Analysis/PlayersApi_get_transfer_portal_data_extract.txt
-          recruiting_groups_file: CFBD_Analysis/RecruitingApi_get_recruiting_groups_data_extract.txt
-          recruiting_players_file: CFBD_Analysis/RecruitingApi_get_recruiting_players_data_extract.txt
-          advanced_team_game_stats_file: CFBD_Analysis/StatsApi_get_advanced_team_game_stats_data_extract.txt
-          fbs_teams_file: CFBD_Analysis/TeamsApi_get_fbs_teams_data_extract.txt
-          roster_data_file: CFBD_Analysis/TeamsApi_get_roster_data_extract.txt
-          output_file: CFBD_Analysis/output/output_prediction.txt
-      Layers:
-        - !Ref libs
-        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
+
+  StackGameTransformationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Timeout: 900
+      MemorySize: 360
+      Architectures:
+        - x86_64
+      ImageConfig:
+        Command:
+          - app.stack_game_tranformation
+      Policies:
+        - Statement:
+            - Sid: Cfbds3ArchiveAccessPolicy
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: arn:aws:s3:::cfbd-data-archive/*
+      Environment:
+        Variables:
+          s3_source_bucket: cfbd-data-archive
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
+
+  RecruitingTransformationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Timeout: 900
+      MemorySize: 360
+      Architectures:
+        - x86_64
+      ImageConfig:
+        Command:
+          - app.recruiting_tranformation
+      Policies:
+        - Statement:
+            - Sid: Cfbds3ArchiveAccessPolicy
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: arn:aws:s3:::cfbd-data-archive/*
+      Environment:
+        Variables:
+          s3_source_bucket: cfbd-data-archive
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
+
+  PreForecastTransformationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Timeout: 900
+      MemorySize: 360
+      Architectures:
+        - x86_64
+      ImageConfig:
+        Command:
+          - app.pre_forecasting_transformation
+      Policies:
+        - Statement:
+            - Sid: Cfbds3ArchiveAccessPolicy
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: arn:aws:s3:::cfbd-data-archive/*
+      Environment:
+        Variables:
+          s3_source_bucket: cfbd-data-archive
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
+
+  ApplyPredictionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Timeout: 900
+      MemorySize: 720
+      Architectures:
+        - x86_64
+      ImageConfig:
+        Command:
+          - app.apply_prediction
+      Policies:
+        - Statement:
+            - Sid: Cfbds3ArchiveAccessPolicy
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: arn:aws:s3:::cfbd-data-archive/*
+      Environment:
+        Variables:
+          s3_source_bucket: cfbd-data-archive
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
 
   PredictionOutputFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: cfbd_data/
-      Handler: app.prediction_output
-      Runtime: python3.9
+      PackageType: Image
       Timeout: 900
       MemorySize: 128
       Architectures:
         - x86_64
+      ImageConfig:
+        Command:
+          - app.prediction_output
       Policies:
         - Statement:
             - Sid: Cfbds3ArchiveAccessPolicy
@@ -134,32 +248,74 @@ Resources:
           Properties:
             Path: /prediction_output
             Method: get
-      Layers:
-        - !Ref libs
-        - arn:aws:lambda:us-east-1:336392948345:layer:AWSSDKPandas-Python39:1
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
 
-  libs:
-    Type: AWS::Serverless::LayerVersion
+  DataIngestionWrapperFunction:
+    Type: AWS::Serverless::Function
     Properties:
-      LayerName: cfbd-analytics-packages-general
-      Description: Lambda layer with libs like pandas and datetime
-      ContentUri: libs
+      PackageType: Image
+      Timeout: 900
+      MemorySize: 128
+      Architectures:
+        - x86_64
+      ImageConfig:
+        Command:
+          - app.cfbd_ingestion_wrapper
+      Policies:
+        - Statement:
+            - Sid: CfbdIngestionInvokePolicy
+              Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt CfbdDataIngestionFunction.Arn
+      Environment:
+        Variables:
+          CfbdFunction: !GetAtt CfbdDataIngestionFunction.Arn
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./cfbd_data
+      DockerTag: cfbdProcessing-v1
 
-  S3DataExtract:
-    Type: 'AWS::S3::Bucket'
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
     Properties:
-      BucketName: !Sub 'cfbd-data-archive'
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: 'AES256'
+      Name:
+        Fn::Join:
+          - ''
+          - - ApplicationInsights-SAM-
+            - Ref: AWS::StackName
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName:
+        Fn::Join:
+          - ''
+          - - ApplicationInsights-SAM-
+            - Ref: AWS::StackName
+      AutoConfigurationEnabled: 'true'
+    DependsOn: ApplicationResourceGroup
+
+#  S3DataExtract:
+#    Type: 'AWS::S3::Bucket'
+#    Properties:
+#      BucketName: !Sub 'cfbd-data-archive'
+#      PublicAccessBlockConfiguration:
+#        BlockPublicAcls: true
+#        BlockPublicPolicy: true
+#        IgnorePublicAcls: true
+#        RestrictPublicBuckets: true
+#      VersioningConfiguration:
+#        Status: Enabled
+#      BucketEncryption:
+#        ServerSideEncryptionConfiguration:
+#          - ServerSideEncryptionByDefault:
+#              SSEAlgorithm: 'AES256'
 
   # Web Platform Infrastructure Resources
   GameLineAPI:
@@ -320,21 +476,29 @@ Resources:
       CloudFrontOriginAccessIdentityConfig:
         Comment: !Sub 'access-identity-react-cors-spa-${GameLineAPI}'
 
-
-
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
   CfbdDataIngestionFunction:
     Description: "College Football Data Ingestion Function ARN"
     Value: !GetAtt CfbdDataIngestionFunction.Arn
+  ApplyPpaAttributionFunction:
+    Description: "PPA Regression Function"
+    Value: !GetAtt ApplyPpaAttributionFunction.Arn
   DataIngestionWrapperFunction:
     Description: "Data Ingestion Wrapper Function ARN"
     Value: !GetAtt DataIngestionWrapperFunction.Arn
   PredictionOutputFunction:
     Description: "API Prediction Output Function ARN"
     Value: !GetAtt PredictionOutputFunction.Arn
+  RecruitingTransformationFunction:
+    Description: "API Prediction Output Function ARN"
+    Value: !GetAtt RecruitingTransformationFunction.Arn
+  StackGameTransformationFunction:
+    Description: "API Prediction Output Function ARN"
+    Value: !GetAtt StackGameTransformationFunction.Arn
+  PreForecastTransformationFunction:
+    Description: "API Prediction Output Function ARN"
+    Value: !GetAtt PreForecastTransformationFunction.Arn
+
   WebAPIEndpoint:
     Value: !Sub "https://${GameLineAPI}.execute-api.${AWS::Region}.amazonaws.com/v1/hello"
   WebBucketName:

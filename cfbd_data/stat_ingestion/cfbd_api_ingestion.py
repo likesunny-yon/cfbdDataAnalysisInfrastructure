@@ -29,12 +29,13 @@ def get_cfbd_data(api_class, api_method, auth_configuration, filter_configs):
         api_responses = []
         for config in config_list:
             # Coaching records and history
+            print(f"fetching config: {config}\napi_instance: {api_instance}\napi_method: {api_method}")
             response = getattr(api_instance, api_method)(**config)
             #print(response)
             api_responses.append(response)
 
     except ApiException as e:
-        raise Exception
+        raise Exception(e)
     converted_dict = {}
     for k in api_responses[0][0].to_dict():
         converted_dict[k] = []
@@ -108,6 +109,7 @@ def get_fbs_teams_transformation(input_df):
 
     transformed_team_attribute_df = expanded_team_attribute_df.drop(['logos'], axis=1)
     return transformed_team_attribute_df
+
 
 
 def pre_storage_transformations(input_df, api_method):

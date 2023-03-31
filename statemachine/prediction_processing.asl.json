@@ -1,0 +1,104 @@
+{
+    "Comment": "A state machine that ingests, processes, and predicts sport values for requested time period.",
+    "StartAt": "Pull Raw Data",
+    "States": {
+        "Pull Raw Data": {
+            "Type": "Task",
+            "Resource": "${CfbdDataIngestionFunction}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 15,
+                    "MaxAttempts": 5,
+                    "BackoffRate": 1.5
+                }
+            ],
+            "Next": "Apply PPA Reqression"
+        },
+        "Apply PPA Reqression": {
+            "Type": "Task",
+            "Resource": "${ApplyPpaAttributionFunction}",
+            "Parameters":{
+                "Payload": {
+                    "api_class": "BettingApi",
+                    "api_method": "get_lines",
+                    "years": 2022,
+                    "season_types": "regular",
+                    "weeks": 12}
+                },
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 15,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 1
+                }
+            ],
+            "Next": "Stack Game Transformation"
+        },
+        "Stack Game Transformation": {
+            "Type": "Task",
+            "Resource": "${StackGameTransformationFunction}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 15,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 1
+                }
+            ],
+            "Next": "Recruiting Transformation"
+        },
+        "Recruiting Transformation": {
+            "Type": "Task",
+            "Resource": "${RecruitingTransformationFunction}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 15,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 1
+                }
+            ],
+            "Next": "PreForecast Transformation"
+        },
+        "PreForecast Transformation": {
+            "Type": "Task",
+            "Resource": "${PreForecastTransformationFunction}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 15,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 1
+                }
+            ],
+            "Next": "Apply Prediction"
+        },
+        "Apply Prediction": {
+            "Type": "Task",
+            "Resource": "${ApplyPredictionFunction}",
+            "Retry": [
+                {
+                    "ErrorEquals": [
+                        "States.TaskFailed"
+                    ],
+                    "IntervalSeconds": 15,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 1
+                }
+            ],
+            "End": true
+        }
+    }
+}
